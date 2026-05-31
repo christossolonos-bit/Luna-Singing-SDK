@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Luna VRM Viewer</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #1a1a2e;
+        font-family: system-ui, sans-serif;
+      }
+      #app {
+        width: 100%;
+        height: 100%;
+        position: relative;
+      }
+      #status {
+        position: fixed;
+        left: 16px;
+        bottom: 16px;
+        padding: 8px 14px;
+        border-radius: 8px;
+        background: rgba(0, 0, 0, 0.55);
+        color: #e8e8f0;
+        font-size: 13px;
+        pointer-events: none;
+        z-index: 10;
+      }
+      .dock {
+        display: flex;
+        gap: 8px;
+        padding: 8px 10px;
+        border-radius: 999px;
+        background: rgba(12, 12, 22, 0.72);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        backdrop-filter: blur(12px);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+        pointer-events: auto;
+        user-select: none;
+        cursor: grab;
+      }
+      .dock.is-dragging {
+        cursor: grabbing;
+        border-color: rgba(255, 255, 255, 0.28);
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+      }
+      .dock-layer {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+      }
+      .dock-btn {
+        display: grid;
+        place-items: center;
+        width: 40px;
+        height: 40px;
+        border: none;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.08);
+        color: #f0f0f8;
+        cursor: pointer;
+        transition: background 0.15s ease, transform 0.15s ease;
+      }
+      .dock-btn:hover {
+        background: rgba(255, 255, 255, 0.18);
+        transform: translateY(-2px);
+      }
+      .dock-btn:active {
+        transform: translateY(0);
+      }
+      .dock-btn svg {
+        width: 20px;
+        height: 20px;
+      }
+      #bg-input,
+      #vrm-input,
+      #music-stem-input,
+      #vocals-stem-input,
+      #emotion-map-input {
+        display: none;
+      }
+      #speak-panel {
+        position: fixed;
+        right: 20px;
+        bottom: 20px;
+        width: min(360px, calc(100vw - 40px));
+        padding: 14px;
+        border-radius: 14px;
+        background: rgba(12, 12, 22, 0.88);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        backdrop-filter: blur(12px);
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+        z-index: 30;
+        display: none;
+        flex-direction: column;
+        gap: 10px;
+      }
+      #speak-panel.is-open {
+        display: flex;
+      }
+      #speak-panel h2 {
+        font-size: 14px;
+        font-weight: 600;
+        color: #f0f0f8;
+      }
+      #speak-panel p {
+        font-size: 12px;
+        color: #a8a8c0;
+        line-height: 1.4;
+      }
+      #speak-text {
+        width: 100%;
+        min-height: 88px;
+        resize: vertical;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        background: rgba(255, 255, 255, 0.06);
+        color: #f0f0f8;
+        font: inherit;
+        font-size: 14px;
+      }
+      #speak-lang {
+        width: 100%;
+        padding: 8px 10px;
+        border-radius: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        background: rgba(255, 255, 255, 0.06);
+        color: #f0f0f8;
+        font: inherit;
+        font-size: 13px;
+      }
+      .speak-actions {
+        display: flex;
+        gap: 8px;
+      }
+      .speak-btn {
+        flex: 1;
+        padding: 10px 12px;
+        border: none;
+        border-radius: 10px;
+        font: inherit;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      #speak-submit {
+        background: #6c5ce7;
+        color: white;
+      }
+      #speak-submit:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+      }
+      #speak-stop {
+        background: rgba(255, 255, 255, 0.1);
+        color: #f0f0f8;
+      }
+      #speak-close {
+        background: transparent;
+        color: #a8a8c0;
+        flex: 0;
+        padding-inline: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="status">Loading…</div>
+    <input id="bg-input" type="file" accept="image/*,video/*" />
+    <input id="vrm-input" type="file" accept=".vrm,model/vrm" />
+    <input id="music-stem-input" type="file" accept="audio/*" />
+    <input id="vocals-stem-input" type="file" accept="audio/*" />
+    <input id="emotion-map-input" type="file" accept="application/json,.json" />
+    <div id="speak-panel" aria-label="Luna speak panel">
+      <h2>Luna Voice</h2>
+      <p>Edge TTS · Ava Multilingual (default). Type in any language.</p>
+      <textarea id="speak-text" placeholder="Hello! こんにちは! Hola Luna…"></textarea>
+      <select id="speak-lang" aria-label="Language"></select>
+      <div class="speak-actions">
+        <button id="speak-submit" class="speak-btn" type="button">Speak</button>
+        <button id="speak-stop" class="speak-btn" type="button">Stop</button>
+        <button id="speak-close" class="speak-btn" type="button">Close</button>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
