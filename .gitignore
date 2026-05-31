@@ -1,3 +1,9 @@
 node_modules/
 dist/
 *.log
+
+# Secrets & local env (never commit tokens)
+.env
+.env.*
+!.env.example
+*.local
