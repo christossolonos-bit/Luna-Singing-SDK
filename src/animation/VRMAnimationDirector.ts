@@ -64,6 +64,9 @@ export class VRMAnimationDirector {
   private mode: MotionMode = "idle";
   private currentAction: THREE.AnimationAction | null = null;
   private endTransitionStarted = false;
+  private playFullClips = false;
+  private singUrl: string | null = null;
+  private singAction: THREE.AnimationAction | null = null;
 
   private readonly motionStop = new MotionStopDetector();
   private readonly boneBridge = new VRMBoneTransitionBridge();
@@ -77,6 +80,11 @@ export class VRMAnimationDirector {
   }
 
   async loadIdle(loader: GLTFLoader, url: string, vrm: VRM): Promise<void> {
+    if (this.idleAction) {
+      this.idleAction.stop();
+      this.idleAction.setEffectiveWeight(0);
+    }
+
     const clip = await loadVRMAClip(loader, url, vrm);
     this.idleAction = this.mixer.clipAction(clip);
     this.idleAction.setLoop(THREE.LoopRepeat, Infinity);
@@ -110,6 +118,36 @@ export class VRMAnimationDirector {
     }
 
     return this.clipCache.size;
+  }
+
+  setPlayFullClips(enabled: boolean): void {
+    this.playFullClips = enabled;
+  }
+
+  setSingUrl(url: string | null): void {
+    this.singUrl = url;
+    if (!url) {
+      this.singAction = null;
+    }
+  }
+
+  async loadSingClip(
+    loader: GLTFLoader,
+    url: string,
+    vrm: VRM,
+  ): Promise<void> {
+    this.setSingUrl(url);
+    if (this.clipCache.has(url)) {
+      this.singAction = this.clipCache.get(url)!.action;
+      return;
+    }
+
+    const clip = await loadVRMAClip(loader, url, vrm);
+    const action = this.mixer.clipAction(clip);
+    action.setLoop(THREE.LoopRepeat, Infinity);
+    action.clampWhenFinished = false;
+    this.clipCache.set(url, { action, duration: clip.duration, url });
+    this.singAction = action;
   }
 
   setPlaylist(urls: readonly string[]): number {
@@ -168,7 +206,21 @@ export class VRMAnimationDirector {
   }
 
   startDance(): void {
-    if (this.mode === "dance" || this.danceActions.length === 0) return;
+    if (this.mode === "dance") return;
+
+    if (this.singUrl && this.singAction) {
+      this.mode = "dance";
+      this.boneBridge.cancel();
+      this.motionStop.reset();
+      this.endTransitionStarted = false;
+      this.stopDanceActions();
+      this.singAction.setLoop(THREE.LoopRepeat, Infinity);
+      this.singAction.clampWhenFinished = false;
+      this.crossfadeTo(this.singAction);
+      return;
+    }
+
+    if (this.danceActions.length === 0) return;
 
     this.mode = "dance";
     this.startDanceAction(this.danceIndex);
@@ -182,6 +234,10 @@ export class VRMAnimationDirector {
     this.motionStop.reset();
     this.endTransitionStarted = false;
     this.stopDanceActions();
+    if (this.singAction) {
+      this.singAction.stop();
+      this.singAction.setEffectiveWeight(0);
+    }
     this.idleAction.setLoop(THREE.LoopRepeat, Infinity);
     this.idleAction.clampWhenFinished = false;
     this.crossfadeTo(this.idleAction);
@@ -199,10 +255,12 @@ export class VRMAnimationDirector {
 
     if (this.mode !== "dance" || this.danceActions.length === 0) return;
     if (this.endTransitionStarted) return;
+    if (this.singUrl && this.singAction) return;
 
     const action = this.danceActions[this.danceIndex]!;
     const duration = this.danceDurations[this.danceIndex]!;
     const motionStopped =
+      !this.playFullClips &&
       action.time >= MIN_PLAY_BEFORE_STOP_CHECK &&
       this.motionStop.update(this.vrm, delta);
     const clipEnded = action.time >= duration - 0.03;

@@ -1,0 +1,5 @@
+# Local server tools for Luna Singing (install once):
+#   pip install -r requirements-server.txt
+#
+# Stem splitting uses Demucs (~2 GB with PyTorch on first install).
+demucs>=4.0.0

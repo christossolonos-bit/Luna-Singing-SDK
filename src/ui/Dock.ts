@@ -8,6 +8,7 @@ export type DockAction =
   | "background-upload"
   | "background-reset"
   | "stems-load"
+  | "stems-split-song"
   | "stems-play-pause"
   | "luna-speak";
 
@@ -48,6 +49,14 @@ const ICONS: Record<DockAction, string> = {
       <circle cx="6" cy="18" r="3"/>
       <circle cx="18" cy="16" r="3"/>
     </svg>`,
+  "stems-split-song": `
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M9 18V5l12-2v13"/>
+      <circle cx="6" cy="18" r="3"/>
+      <circle cx="18" cy="16" r="3"/>
+      <path d="M18 3v4"/>
+      <path d="M16 5h4"/>
+    </svg>`,
   "stems-play-pause": `
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
       <polygon points="5 3 19 12 5 21 5 3"/>
@@ -67,6 +76,7 @@ const TOOLTIPS: Record<DockAction, string> = {
   "background-upload": "Upload background",
   "background-reset": "Reset background",
   "stems-load": "Load music & vocals stems",
+  "stems-split-song": "Upload full song (local split)",
   "stems-play-pause": "Play / pause track",
   "luna-speak": "Luna speak (Edge TTS)",
 };
@@ -85,6 +95,7 @@ export class Dock {
       "vrm-upload",
       "vrm-reset",
       "luna-speak",
+      "stems-split-song",
       "stems-load",
       "stems-play-pause",
       "background-upload",

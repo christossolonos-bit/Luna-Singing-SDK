@@ -7,10 +7,14 @@ import { VRMAnimationLoaderPlugin } from "@pixiv/three-vrm-animation";
 import { ALL_DANCE_URLS } from "./animation/danceAnimations";
 import { VRMAnimationDirector } from "./animation/VRMAnimationDirector";
 import { analyzeMusicGenre, type GenreAnalysis } from "./audio/genreAnalysis";
+import { splitFullSong, stemsAsFiles } from "./audio/stemSplitClient";
 import {
   DEFAULT_AVATAR_NAME,
   VRMAvatarController,
 } from "./avatar/VRMAvatarController";
+import {
+  motionCatalogForVrm,
+} from "./avatar/avatarMotionCatalog";
 import { BackgroundController } from "./scene/BackgroundController";
 import { Dock, type DockAction } from "./ui/Dock";
 import { dockPositionFromViewerCenter } from "./ui/dockDefaults";
@@ -21,6 +25,7 @@ const statusEl = document.getElementById("status")!;
 const container = document.getElementById("app")!;
 const bgInput = document.getElementById("bg-input") as HTMLInputElement;
 const vrmInput = document.getElementById("vrm-input") as HTMLInputElement;
+const fullSongInput = document.getElementById("full-song-input") as HTMLInputElement;
 const musicStemInput = document.getElementById("music-stem-input") as HTMLInputElement;
 const vocalsStemInput = document.getElementById("vocals-stem-input") as HTMLInputElement;
 const emotionMapInput = document.getElementById("emotion-map-input") as HTMLInputElement;
@@ -156,6 +161,8 @@ const dock = new Dock({
     } else if (action === "stems-load") {
       pendingMusicStem = null;
       musicStemInput.click();
+    } else if (action === "stems-split-song") {
+      fullSongInput.click();
     } else if (action === "stems-play-pause") {
       void toggleStemPlayback();
     } else if (action === "luna-speak") {
@@ -176,6 +183,15 @@ new DockDragController({
   },
 });
 
+async function applyAvatarMotions(
+  controller: VRMAvatarController,
+  vrmFilename: string,
+): Promise<{ clipCount: number; label: string }> {
+  const catalog = await motionCatalogForVrm(vrmFilename);
+  const clipCount = await controller.applyMotionCatalog(catalog);
+  return { clipCount, label: catalog.label };
+}
+
 async function loadAvatarFromFile(file: File): Promise<void> {
   if (!avatarController) return;
 
@@ -186,11 +202,14 @@ async function loadAvatarFromFile(file: File): Promise<void> {
   setStatus(`Loading ${file.name}…`);
   try {
     await avatarController.load({ kind: "file", file });
+    const motion = await applyAvatarMotions(avatarController, file.name);
     wireSongEndedHandler(avatarController);
     if (avatarController.animationDirector) {
       exposeDanceDebug(avatarController.animationDirector);
     }
-    setStatus(`Avatar: ${avatarController.displayName} · ${ALL_DANCE_URLS.length} dances ready`);
+    setStatus(
+      `Avatar: ${avatarController.displayName} · ${motion.clipCount} motions (${motion.label})`,
+    );
   } catch (err) {
     console.error(err);
     setStatus(`VRM error: ${err instanceof Error ? err.message : String(err)}`);
@@ -207,11 +226,17 @@ async function loadDefaultAvatar(): Promise<void> {
   setStatus(`Loading ${DEFAULT_AVATAR_NAME}.vrm…`);
   try {
     await avatarController.loadDefault();
+    const motion = await applyAvatarMotions(
+      avatarController,
+      `${DEFAULT_AVATAR_NAME}.vrm`,
+    );
     wireSongEndedHandler(avatarController);
     if (avatarController.animationDirector) {
       exposeDanceDebug(avatarController.animationDirector);
     }
-    setStatus(`Avatar: ${DEFAULT_AVATAR_NAME} · ${ALL_DANCE_URLS.length} dances ready`);
+    setStatus(
+      `Avatar: ${DEFAULT_AVATAR_NAME} · ${motion.clipCount} motions (${motion.label})`,
+    );
   } catch (err) {
     console.error(err);
     setStatus(`VRM error: ${err instanceof Error ? err.message : String(err)}`);
@@ -234,7 +259,7 @@ async function toggleStemPlayback() {
     if (playing) {
       avatarController?.animationDirector?.startDance();
       const genre = lastGenreAnalysis?.label ?? "Mixed";
-      setStatus(`Playing · ${name} · ${genre} · dance · lip sync`);
+      setStatus(`Playing · ${name} · ${genre} · ${avatarController?.motionSingUrl ? "singing" : "dance"} · lip sync`);
     } else {
       avatarController?.animationDirector?.startIdle();
       setStatus("Paused");
@@ -242,6 +267,42 @@ async function toggleStemPlayback() {
   } catch (err) {
     console.error(err);
     setStatus(`Playback error: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+function formatDuration(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+async function finishStemLoad(music: File, vocals: File): Promise<void> {
+  const stemPerformance = avatarController?.stemPerformance;
+  if (!stemPerformance) return;
+
+  setStatus("Loading stems…");
+  try {
+    const duration = await stemPerformance.loadStemsFromFiles(music, vocals);
+    setStatus("Analyzing song genre…");
+    try {
+      lastGenreAnalysis = await analyzeMusicGenre(music);
+      const playlist = avatarController?.motionPlaylistUrls ?? ALL_DANCE_URLS;
+      const danceCount = avatarController?.animationDirector?.setPlaylist(playlist) ?? 0;
+      setStatus(
+        `Stems ready (${formatDuration(duration)}) · ${lastGenreAnalysis.label} · ${lastGenreAnalysis.bpm} BPM · ${danceCount} dances`,
+      );
+    } catch (err) {
+      console.warn("Genre analysis failed:", err);
+      lastGenreAnalysis = null;
+      avatarController?.animationDirector?.setPlaylist(
+        avatarController?.motionPlaylistUrls ?? ALL_DANCE_URLS,
+      );
+      setStatus(`Stems ready (${formatDuration(duration)}) · tap play`);
+    }
+    emotionMapInput.click();
+  } catch (err) {
+    console.error(err);
+    setStatus(`Stem error: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -267,29 +328,27 @@ vocalsStemInput.addEventListener("change", () => {
   const music = pendingMusicStem;
   pendingMusicStem = null;
 
-  setStatus("Loading stems…");
-  stemPerformance
-    .loadStemsFromFiles(music, file)
-    .then(async (duration) => {
-      setStatus("Analyzing song genre…");
-      try {
-        lastGenreAnalysis = await analyzeMusicGenre(music);
-        const danceCount = avatarController?.animationDirector?.setPlaylist(ALL_DANCE_URLS) ?? 0;
-        setStatus(
-          `Stems ready (${formatDuration(duration)}) · ${lastGenreAnalysis.label} · ${lastGenreAnalysis.bpm} BPM · ${danceCount} dances`,
-        );
-      } catch (err) {
-        console.warn("Genre analysis failed:", err);
-        lastGenreAnalysis = null;
-        avatarController?.animationDirector?.setPlaylist(ALL_DANCE_URLS);
-        setStatus(`Stems ready (${formatDuration(duration)}) · tap play`);
-      }
-      emotionMapInput.click();
-    })
-    .catch((err) => {
+  void finishStemLoad(music, file);
+});
+
+fullSongInput.addEventListener("change", () => {
+  const file = fullSongInput.files?.[0];
+  fullSongInput.value = "";
+  if (!file || !avatarController?.stemPerformance) return;
+
+  avatarController.stemPerformance.pause();
+  avatarController.animationDirector?.startIdle();
+
+  void (async () => {
+    try {
+      const split = await splitFullSong(file, setStatus);
+      const { music, vocals } = stemsAsFiles(split);
+      await finishStemLoad(music, vocals);
+    } catch (err) {
       console.error(err);
-      setStatus(`Stem error: ${err instanceof Error ? err.message : String(err)}`);
-    });
+      setStatus(`Split error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  })();
 });
 
 emotionMapInput.addEventListener("change", () => {
@@ -334,12 +393,6 @@ vrmInput.addEventListener("change", () => {
 
   void loadAvatarFromFile(file);
 });
-
-function formatDuration(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m}:${s.toString().padStart(2, "0")}`;
-}
 
 function exposeDanceDebug(director: VRMAnimationDirector): void {
   (window as unknown as { lunaDances?: object }).lunaDances = {

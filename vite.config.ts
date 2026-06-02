@@ -1,8 +1,8 @@
 import { defineConfig } from "vite";
-import { lunaTtsPlugin } from "./vite-plugin-luna-tts";
+import { lunaServerPlugin } from "./vite-plugin-luna-tts";
 
 export default defineConfig({
-  plugins: [lunaTtsPlugin()],
+  plugins: [lunaServerPlugin()],
   server: {
     port: 5173,
     open: true,

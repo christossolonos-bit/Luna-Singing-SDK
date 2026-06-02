@@ -2,6 +2,7 @@ import * as THREE from "three";
 import type { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { VRMUtils, type VRM } from "@pixiv/three-vrm";
 import { ALL_DANCE_URLS, IDLE_ANIMATION_URL } from "../animation/danceAnimations";
+import type { MotionCatalog } from "./avatarMotionCatalog";
 import { VRMAnimationDirector } from "../animation/VRMAnimationDirector";
 import { StemMixer } from "../audio/StemMixer";
 import { StemPerformance } from "../audio/StemPerformance";
@@ -27,6 +28,9 @@ export class VRMAvatarController {
   animationDirector: VRMAnimationDirector | null = null;
 
   displayName = DEFAULT_AVATAR_NAME;
+  motionIdleUrl = IDLE_ANIMATION_URL;
+  motionPlaylistUrls: readonly string[] = ALL_DANCE_URLS;
+  motionSingUrl: string | null = null;
 
   /** Called when loaded stems finish playing. */
   onSongEnded: (() => void) | null = null;
@@ -143,5 +147,29 @@ export class VRMAvatarController {
     this.stemPerformance = stemPerformance;
     this.lunaTTS = lunaTTS;
     this.animationDirector = animationDirector;
+  }
+
+  async applyMotionCatalog(catalog: MotionCatalog): Promise<number> {
+    if (!this.vrm || !this.animationDirector) {
+      return 0;
+    }
+
+    this.motionIdleUrl = catalog.idleUrl;
+    this.motionPlaylistUrls = catalog.playlistUrls;
+    this.motionSingUrl = catalog.singUrl ?? null;
+
+    this.animationDirector.setPlayFullClips(catalog.playFullClips ?? false);
+    this.animationDirector.setSingUrl(catalog.singUrl ?? null);
+    this.animationDirector.startIdle();
+    await this.animationDirector.loadIdle(this.loader, catalog.idleUrl, this.vrm);
+    await this.animationDirector.loadAllDanceClips(
+      this.loader,
+      catalog.playlistUrls,
+      this.vrm,
+    );
+    if (catalog.singUrl) {
+      await this.animationDirector.loadSingClip(this.loader, catalog.singUrl, this.vrm);
+    }
+    return this.animationDirector.setPlaylist(catalog.playlistUrls);
   }
 }
