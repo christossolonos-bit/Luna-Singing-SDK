@@ -23,6 +23,8 @@ export class VRMPhoneticBoneDriver {
   private currentJawOpen = 0;
   private currentHeadPitch = 0;
   private restCaptured = false;
+  /** Performance driver owns head motion while procedural singing is active. */
+  headMotionEnabled = true;
 
   constructor(
     private readonly vrm: VRM,
@@ -54,17 +56,25 @@ export class VRMPhoneticBoneDriver {
       HEAD_PITCH_BY_CATEGORY[phoneticCategory(viseme)] * Math.min(1, level * 3);
 
     this.currentJawOpen += (jawTarget - this.currentJawOpen) * smoothing;
-    this.currentHeadPitch += (headTarget - this.currentHeadPitch) * smoothing;
+    if (this.headMotionEnabled) {
+      this.currentHeadPitch += (headTarget - this.currentHeadPitch) * smoothing;
+    } else {
+      this.currentHeadPitch += (0 - this.currentHeadPitch) * smoothing;
+    }
 
     this.applyJaw(this.currentJawOpen);
-    this.applyHeadPitch(this.currentHeadPitch);
+    if (this.headMotionEnabled) {
+      this.applyHeadPitch(this.currentHeadPitch);
+    }
   }
 
   reset(): void {
     this.currentJawOpen = 0;
     this.currentHeadPitch = 0;
     this.applyJaw(0);
-    this.applyHeadPitch(0);
+    if (this.headMotionEnabled) {
+      this.applyHeadPitch(0);
+    }
   }
 
   private captureRestIfNeeded(): void {

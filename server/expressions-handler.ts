@@ -1,11 +1,30 @@
 import { createReadStream } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { basename, join, resolve } from "node:path";
+import { basename, resolve } from "node:path";
 
-const VIKTOR_EXPRESSIONS_DIR = resolve(
-  process.env.LUNA_VIKTOR_EXPRESSIONS_DIR ?? "D:\\Luna streamer\\expressions1",
-);
+type ExpressionCatalog = {
+  apiPrefix: string;
+  dir: string;
+  idlePatterns: RegExp[];
+};
+
+const CATALOGS: ExpressionCatalog[] = [
+  {
+    apiPrefix: "/api/viktor-expressions",
+    dir: resolve(
+      process.env.LUNA_VIKTOR_EXPRESSIONS_DIR ?? "D:\\Luna streamer\\expressions1",
+    ),
+    idlePatterns: [/man%20standing\.vrma$/i, /standing/i],
+  },
+  {
+    apiPrefix: "/api/female-expressions",
+    dir: resolve(
+      process.env.LUNA_FEMALE_EXPRESSIONS_DIR ?? "D:\\Luna streamer\\expressions",
+    ),
+    idlePatterns: [/standing2\.vrma$/i, /standing/i],
+  },
+];
 
 function sendJson(res: ServerResponse, status: number, data: unknown): void {
   res.statusCode = status;
@@ -20,12 +39,12 @@ function safeVrmaName(name: string): string | null {
   return base;
 }
 
-async function resolveVrmaPath(name: string): Promise<string | null> {
+async function resolveVrmaPath(catalog: ExpressionCatalog, name: string): Promise<string | null> {
   const safe = safeVrmaName(name);
   if (!safe) return null;
 
-  const filePath = resolve(VIKTOR_EXPRESSIONS_DIR, safe);
-  if (!filePath.startsWith(VIKTOR_EXPRESSIONS_DIR)) return null;
+  const filePath = resolve(catalog.dir, safe);
+  if (!filePath.startsWith(catalog.dir)) return null;
 
   try {
     const info = await stat(filePath);
@@ -35,10 +54,10 @@ async function resolveVrmaPath(name: string): Promise<string | null> {
   }
 }
 
-async function listViktorClips(): Promise<string[]> {
+async function listClips(catalog: ExpressionCatalog): Promise<string[]> {
   let entries: string[];
   try {
-    entries = await readdir(VIKTOR_EXPRESSIONS_DIR);
+    entries = await readdir(catalog.dir);
   } catch {
     return [];
   }
@@ -52,16 +71,16 @@ async function listViktorClips(): Promise<string[]> {
     .sort((a, b) => a.localeCompare(b));
 }
 
-async function viktorSingUrl(): Promise<string | null> {
-  const filePath = resolve(VIKTOR_EXPRESSIONS_DIR, "singing.vrma");
-  try {
-    const info = await stat(filePath);
-    return info.isFile()
-      ? `/api/viktor-expressions/${encodeURIComponent("singing.vrma")}`
-      : null;
-  } catch {
-    return null;
+function pickIdle(clips: string[], patterns: RegExp[]): string | null {
+  for (const pattern of patterns) {
+    const hit = clips.find((clip) => pattern.test(clip));
+    if (hit) return hit;
   }
+  return clips[0] ?? null;
+}
+
+function findCatalog(url: string): ExpressionCatalog | null {
+  return CATALOGS.find((catalog) => url.startsWith(catalog.apiPrefix)) ?? null;
 }
 
 export async function handleExpressionsRequest(
@@ -70,30 +89,29 @@ export async function handleExpressionsRequest(
 ): Promise<boolean> {
   const url = req.url ?? "";
 
-  if (url === "/api/viktor-expressions/list" && req.method === "GET") {
-    const files = await listViktorClips();
-    const clips = files.map(
-      (file) => `/api/viktor-expressions/${encodeURIComponent(file)}`,
-    );
-    const idle =
-      clips.find((clip) => /man%20standing\.vrma$/i.test(clip)) ??
-      clips.find((clip) => /standing/i.test(clip)) ??
-      clips[0] ??
-      null;
-    const sing = await viktorSingUrl();
+  for (const catalog of CATALOGS) {
+    if (url === `${catalog.apiPrefix}/list` && req.method === "GET") {
+      const files = await listClips(catalog);
+      const clips = files.map(
+        (file) => `${catalog.apiPrefix}/${encodeURIComponent(file)}`,
+      );
+      const idle = pickIdle(clips, catalog.idlePatterns);
 
-    sendJson(res, 200, {
-      dir: VIKTOR_EXPRESSIONS_DIR,
-      idle,
-      sing,
-      clips,
-    });
-    return true;
+      sendJson(res, 200, {
+        dir: catalog.dir,
+        idle,
+        clips,
+      });
+      return true;
+    }
   }
 
-  const fileMatch = url.match(/^\/api\/viktor-expressions\/([^?]+)$/);
+  const fileMatch = url.match(/^(\/api\/(?:viktor|female)-expressions)\/([^?]+)$/);
   if (fileMatch && req.method === "GET") {
-    const filePath = await resolveVrmaPath(decodeURIComponent(fileMatch[1]!));
+    const catalog = findCatalog(fileMatch[1]!);
+    if (!catalog) return false;
+
+    const filePath = await resolveVrmaPath(catalog, decodeURIComponent(fileMatch[2]!));
     if (!filePath) {
       sendJson(res, 404, { error: "VRMA not found" });
       return true;

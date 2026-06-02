@@ -37,6 +37,13 @@ const KEYWORDS: Record<EmotionName, string[]> = {
     "stuck", "can't", "won't", "again", "stress", "stressed", "irritated", "bothered",
     "困", "疲", "もう", "イライラ",
   ],
+  confused: [
+    "confused", "confusion", "puzzled", "wonder", "wondering", "huh", "strange", "weird",
+    "don't know", "dont know", "question", "迷", "不思議",
+  ],
+  neutral: ["okay", "fine", "alright", "maybe"],
+  fear: ["afraid", "fear", "scared", "terror", "horror", "nightmare", "panic", "恐", "怖"],
+  disgusted: ["disgust", "disgusted", "gross", "nasty", "ugh", "ew", "sick", "嫌"],
 };
 
 /** Multi-label scores — several emotions can be active at once. */
@@ -49,6 +56,10 @@ export function emotionFromText(text: string): EmotionWeights {
     relaxed: 0,
     surprised: 0,
     frustrated: 0,
+    confused: 0,
+    neutral: 0,
+    fear: 0,
+    disgusted: 0,
   };
 
   for (const [emotion, words] of Object.entries(KEYWORDS) as [EmotionName, string[]][]) {

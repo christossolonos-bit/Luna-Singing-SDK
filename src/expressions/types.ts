@@ -5,6 +5,10 @@ export const EMOTION_NAMES = [
   "relaxed",
   "surprised",
   "frustrated",
+  "confused",
+  "neutral",
+  "fear",
+  "disgusted",
 ] as const;
 
 export type EmotionName = (typeof EMOTION_NAMES)[number];
@@ -37,6 +41,10 @@ export const EMPTY_EMOTIONS: EmotionWeights = {
   relaxed: 0,
   surprised: 0,
   frustrated: 0,
+  confused: 0,
+  neutral: 0,
+  fear: 0,
+  disgusted: 0,
 };
 
 /** Face presets driven from EmotionWeights (frustrated is a composite, not a VRM preset). */
@@ -51,9 +59,9 @@ export type FaceExpressionWeights = {
 export function toFaceExpressions(weights: EmotionWeights): FaceExpressionWeights {
   return {
     happy: weights.happy,
-    sad: weights.sad + weights.frustrated * 0.35,
-    angry: weights.angry + weights.frustrated * 0.55,
-    relaxed: weights.relaxed,
-    surprised: weights.surprised,
+    sad: weights.sad + weights.frustrated * 0.35 + weights.fear * 0.15,
+    angry: weights.angry + weights.frustrated * 0.55 + weights.disgusted * 0.25,
+    relaxed: weights.relaxed + weights.neutral * 0.4,
+    surprised: weights.surprised + weights.confused * 0.45 + weights.fear * 0.2,
   };
 }

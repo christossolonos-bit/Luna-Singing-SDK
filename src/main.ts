@@ -258,10 +258,12 @@ async function toggleStemPlayback() {
     const name = avatarController?.displayName ?? DEFAULT_AVATAR_NAME;
     if (playing) {
       avatarController?.animationDirector?.startDance();
+      avatarController?.setSingingPerformanceActive(true);
       const genre = lastGenreAnalysis?.label ?? "Mixed";
-      setStatus(`Playing · ${name} · ${genre} · ${avatarController?.motionSingUrl ? "singing" : "dance"} · lip sync`);
+      setStatus(`Playing · ${name} · ${genre} · ${avatarController?.motionPerformance ? "performance" : "dance"} · lip sync`);
     } else {
       avatarController?.animationDirector?.startIdle();
+      avatarController?.setSingingPerformanceActive(false);
       setStatus("Paused");
     }
   } catch (err) {
@@ -288,6 +290,14 @@ async function finishStemLoad(music: File, vocals: File): Promise<void> {
       lastGenreAnalysis = await analyzeMusicGenre(music);
       const playlist = avatarController?.motionPlaylistUrls ?? ALL_DANCE_URLS;
       const danceCount = avatarController?.animationDirector?.setPlaylist(playlist) ?? 0;
+      if (avatarController?.singingPerformance) {
+        setStatus("Analyzing performance map…");
+        await avatarController.loadSingingPerformanceMap(
+          music,
+          lastGenreAnalysis.genre,
+          lastGenreAnalysis.bpm,
+        );
+      }
       setStatus(
         `Stems ready (${formatDuration(duration)}) · ${lastGenreAnalysis.label} · ${lastGenreAnalysis.bpm} BPM · ${danceCount} dances`,
       );
@@ -360,7 +370,7 @@ emotionMapInput.addEventListener("change", () => {
   stemPerformance
     .loadEmotionMap(file)
     .then(() => {
-      setStatus(`Emotion map loaded: ${file.name} · tap play`);
+      setStatus(`Lyrics loaded: ${file.name} · expressions follow lyrics · tap play`);
     })
     .catch((err) => {
       console.error(err);

@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import type { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { VRMUtils, type VRM } from "@pixiv/three-vrm";
-import { ALL_DANCE_URLS, IDLE_ANIMATION_URL } from "../animation/danceAnimations";
+import { ALL_DANCE_URLS, IDLE_ANIMATION_URL, type SongGenre } from "../animation/danceAnimations";
 import type { MotionCatalog } from "./avatarMotionCatalog";
 import { VRMAnimationDirector } from "../animation/VRMAnimationDirector";
 import { StemMixer } from "../audio/StemMixer";
@@ -9,6 +9,8 @@ import { StemPerformance } from "../audio/StemPerformance";
 import { VRMEmotionDriver } from "../expressions/VRMEmotionDriver";
 import { VRMPhoneticBoneDriver } from "../lipsync/VRMPhoneticBoneDriver";
 import { VRMVisemeDriver } from "../lipsync/VRMVisemeDriver";
+import { SingingPerformanceDriver } from "../performance/ViktorPerformanceDriver";
+import { analyzeSongPerformance } from "../performance/ViktorPerformanceAnalysis";
 import { LunaTTS } from "../voice/LunaTTS";
 
 export const DEFAULT_VRM_URL = "/Luna.vrm";
@@ -26,11 +28,12 @@ export class VRMAvatarController {
   stemPerformance: StemPerformance | null = null;
   lunaTTS: LunaTTS | null = null;
   animationDirector: VRMAnimationDirector | null = null;
+  singingPerformance: SingingPerformanceDriver | null = null;
 
   displayName = DEFAULT_AVATAR_NAME;
   motionIdleUrl = IDLE_ANIMATION_URL;
   motionPlaylistUrls: readonly string[] = ALL_DANCE_URLS;
-  motionSingUrl: string | null = null;
+  motionPerformance = false;
 
   /** Called when loaded stems finish playing. */
   onSongEnded: (() => void) | null = null;
@@ -49,6 +52,11 @@ export class VRMAvatarController {
 
   get mixer(): StemMixer {
     return this.preservedMixer;
+  }
+
+  /** @deprecated Use singingPerformance */
+  get viktorPerformance(): SingingPerformanceDriver | null {
+    return this.singingPerformance;
   }
 
   async loadDefault(): Promise<void> {
@@ -99,6 +107,7 @@ export class VRMAvatarController {
     this.stemPerformance = null;
     this.lunaTTS = null;
     this.animationDirector = null;
+    this.singingPerformance = null;
 
     if (this.objectUrl) {
       URL.revokeObjectURL(this.objectUrl);
@@ -108,6 +117,7 @@ export class VRMAvatarController {
 
   update(delta: number): void {
     this.animationDirector?.update(delta);
+    this.singingPerformance?.update(delta);
     this.vrm?.update(delta);
     this.stemPerformance?.update();
     this.lunaTTS?.update();
@@ -118,6 +128,7 @@ export class VRMAvatarController {
     this.lipsync?.reset();
     this.emotion?.reset();
     this.phonetics?.reset();
+    this.singingPerformance?.reset();
     this.onSongEnded?.();
   }
 
@@ -154,12 +165,18 @@ export class VRMAvatarController {
       return 0;
     }
 
+    const usePerformance = Boolean(catalog.proceduralPerformance);
+
     this.motionIdleUrl = catalog.idleUrl;
     this.motionPlaylistUrls = catalog.playlistUrls;
-    this.motionSingUrl = catalog.singUrl ?? null;
+    this.motionPerformance = usePerformance;
+    if (this.stemPerformance) {
+      this.stemPerformance.proceduralPerformanceMode = usePerformance;
+      this.emotion?.setLyricPriority(usePerformance);
+    }
 
     this.animationDirector.setPlayFullClips(catalog.playFullClips ?? false);
-    this.animationDirector.setSingUrl(catalog.singUrl ?? null);
+    this.animationDirector.setPerformanceMode(usePerformance);
     this.animationDirector.startIdle();
     await this.animationDirector.loadIdle(this.loader, catalog.idleUrl, this.vrm);
     await this.animationDirector.loadAllDanceClips(
@@ -167,9 +184,52 @@ export class VRMAvatarController {
       catalog.playlistUrls,
       this.vrm,
     );
-    if (catalog.singUrl) {
-      await this.animationDirector.loadSingClip(this.loader, catalog.singUrl, this.vrm);
+
+    if (usePerformance) {
+      if (!this.phonetics) {
+        throw new Error("Avatar phonetics not ready.");
+      }
+      this.singingPerformance?.reset();
+      this.singingPerformance = new SingingPerformanceDriver(this.vrm, this.phonetics);
+      this.singingPerformance.connectStem(this.preservedMixer);
+    } else {
+      this.singingPerformance?.reset();
+      this.singingPerformance = null;
+      if (this.phonetics) {
+        this.phonetics.headMotionEnabled = true;
+      }
     }
+
     return this.animationDirector.setPlaylist(catalog.playlistUrls);
+  }
+
+  async loadSingingPerformanceMap(
+    music: File | Blob,
+    genre: SongGenre,
+    bpm?: number,
+  ): Promise<void> {
+    if (!this.singingPerformance) return;
+    const map = await analyzeSongPerformance(music, genre, bpm);
+    this.singingPerformance.loadMap(map);
+  }
+
+  /** @deprecated Use loadSingingPerformanceMap */
+  async loadViktorPerformanceMap(
+    music: File | Blob,
+    genre: SongGenre,
+    bpm?: number,
+  ): Promise<void> {
+    return this.loadSingingPerformanceMap(music, genre, bpm);
+  }
+
+  setSingingPerformanceActive(active: boolean): void {
+    if (!this.singingPerformance) return;
+    this.singingPerformance.connectStem(this.preservedMixer);
+    this.singingPerformance.setActive(active);
+  }
+
+  /** @deprecated Use setSingingPerformanceActive */
+  setViktorPerformanceActive(active: boolean): void {
+    this.setSingingPerformanceActive(active);
   }
 }

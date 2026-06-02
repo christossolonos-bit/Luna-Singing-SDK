@@ -65,8 +65,9 @@ export class VRMAnimationDirector {
   private currentAction: THREE.AnimationAction | null = null;
   private endTransitionStarted = false;
   private playFullClips = false;
-  private singUrl: string | null = null;
-  private singAction: THREE.AnimationAction | null = null;
+  /** Procedural performance: keep idle pose, no dance/sing VRMA loop. */
+  private performanceMode = false;
+  private performancePlaying = false;
 
   private readonly motionStop = new MotionStopDetector();
   private readonly boneBridge = new VRMBoneTransitionBridge();
@@ -124,30 +125,11 @@ export class VRMAnimationDirector {
     this.playFullClips = enabled;
   }
 
-  setSingUrl(url: string | null): void {
-    this.singUrl = url;
-    if (!url) {
-      this.singAction = null;
+  setPerformanceMode(enabled: boolean): void {
+    this.performanceMode = enabled;
+    if (!enabled) {
+      this.performancePlaying = false;
     }
-  }
-
-  async loadSingClip(
-    loader: GLTFLoader,
-    url: string,
-    vrm: VRM,
-  ): Promise<void> {
-    this.setSingUrl(url);
-    if (this.clipCache.has(url)) {
-      this.singAction = this.clipCache.get(url)!.action;
-      return;
-    }
-
-    const clip = await loadVRMAClip(loader, url, vrm);
-    const action = this.mixer.clipAction(clip);
-    action.setLoop(THREE.LoopRepeat, Infinity);
-    action.clampWhenFinished = false;
-    this.clipCache.set(url, { action, duration: clip.duration, url });
-    this.singAction = action;
   }
 
   setPlaylist(urls: readonly string[]): number {
@@ -206,27 +188,36 @@ export class VRMAnimationDirector {
   }
 
   startDance(): void {
-    if (this.mode === "dance") return;
-
-    if (this.singUrl && this.singAction) {
-      this.mode = "dance";
-      this.boneBridge.cancel();
-      this.motionStop.reset();
-      this.endTransitionStarted = false;
-      this.stopDanceActions();
-      this.singAction.setLoop(THREE.LoopRepeat, Infinity);
-      this.singAction.clampWhenFinished = false;
-      this.crossfadeTo(this.singAction);
+    if (this.performanceMode) {
+      this.startPerformance();
       return;
     }
 
+    if (this.mode === "dance") return;
     if (this.danceActions.length === 0) return;
 
     this.mode = "dance";
     this.startDanceAction(this.danceIndex);
   }
 
+  /** Idle base pose while procedural movement runs on top. */
+  private startPerformance(): void {
+    if (!this.idleAction) return;
+
+    this.performancePlaying = true;
+    this.boneBridge.cancel();
+    this.motionStop.reset();
+    this.endTransitionStarted = false;
+    this.stopDanceActions();
+    this.mode = "idle";
+    this.idleAction.setLoop(THREE.LoopRepeat, Infinity);
+    this.idleAction.clampWhenFinished = false;
+    this.crossfadeTo(this.idleAction);
+  }
+
   startIdle(): void {
+    this.performancePlaying = false;
+
     if (this.mode === "idle" || !this.idleAction) return;
 
     this.mode = "idle";
@@ -234,10 +225,6 @@ export class VRMAnimationDirector {
     this.motionStop.reset();
     this.endTransitionStarted = false;
     this.stopDanceActions();
-    if (this.singAction) {
-      this.singAction.stop();
-      this.singAction.setEffectiveWeight(0);
-    }
     this.idleAction.setLoop(THREE.LoopRepeat, Infinity);
     this.idleAction.clampWhenFinished = false;
     this.crossfadeTo(this.idleAction);
@@ -255,7 +242,7 @@ export class VRMAnimationDirector {
 
     if (this.mode !== "dance" || this.danceActions.length === 0) return;
     if (this.endTransitionStarted) return;
-    if (this.singUrl && this.singAction) return;
+    if (this.performancePlaying) return;
 
     const action = this.danceActions[this.danceIndex]!;
     const duration = this.danceDurations[this.danceIndex]!;

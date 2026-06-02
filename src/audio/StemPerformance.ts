@@ -6,6 +6,8 @@ import type { EmotionTimeline } from "../expressions/types";
 
 export class StemPerformance {
   readonly mixer: StemMixer;
+  /** Procedural performance uses expression-driven face instead of vocal emotion. */
+  proceduralPerformanceMode = false;
 
   constructor(
     private readonly lipsync: VRMVisemeDriver,
